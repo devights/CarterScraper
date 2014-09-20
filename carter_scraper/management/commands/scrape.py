@@ -7,4 +7,4 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         cs = CarterScrape()
-        cs.fetch_page_for_campus()
+        cs.fetch_all_pages()

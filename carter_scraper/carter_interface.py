@@ -12,13 +12,25 @@ SHORELINE = "cartersubarusoa"
 class CarterScrape():
     campus = None
     start_count = 0
+    current_page = 0
+    max_page = 1
 
     def __init__(self, start_count=0, campus=SHORELINE):
         self.campus = campus
         self.start_count = start_count
 
-    def fetch_page_for_campus(self):
-        url = "http://www.cartersubarushoreline.com/all-inventory/index.htm?start=%s&make=Subaru&accountId=%s&model=Outback&" % (self.start_count, self.campus)
+    def fetch_all_pages(self):
+        while self.current_page < self.max_page:
+            try:
+                self.fetch_page_for_campus(self.start_count, self.campus)
+            except urllib2.URLError:
+                break
+            except Exception as ex:
+                print ex
+            self.start_count += 16
+
+    def fetch_page_for_campus(self, count, campus):
+        url = "http://www.cartersubarushoreline.com/all-inventory/index.htm?start=%s&make=Subaru&accountId=%s&model=Outback&" % (count, campus)
         req = urllib2.Request(url)
         html = None
         try:
@@ -31,8 +43,15 @@ class CarterScrape():
             print url
             raise
         if html is not None:
+            self.set_pages(html)
             self._get_cars_from_html(html)
 
+    def set_pages(self, html):
+        r = re.compile('Page ([0-9]{1,2}) of ([0-9]{1,2})')
+        match = r.search(html)
+
+        self.current_page = match.group(1)
+        self.max_page = match.group(2)
 
     def _get_cars_from_html(self, html):
         soup = BeautifulSoup(html)
@@ -41,12 +60,25 @@ class CarterScrape():
         listings = []
         cars = []
 
-        for list in lists:
-            listings += list.findChildren("li", recursive=False)
+        for list_item in lists:
+            listings += list_item.findChildren("li", recursive=False)
         for item in listings:
-            cars.append(self._car_from_html(item))
-            # break
-        Car.objects.bulk_create(cars)
+            car = self._car_from_html(item)
+            if car is not None:
+                cars.append(car)
+
+        car_vins = []
+        for car in cars:
+            car_vins.append(car.vin)
+        existing_cars = Car.objects.filter(vin__in=car_vins)
+        existing_vins = []
+        for car in existing_cars:
+            existing_vins.append(car.vin)
+        cars_to_add = []
+        for car in cars:
+            if car.vin not in existing_vins:
+                cars_to_add.append(car)
+        Car.objects.bulk_create(cars_to_add)
 
 
 
@@ -57,10 +89,14 @@ class CarterScrape():
             title_block = html.find("h1", class_="fn h3")
             link = title_block.a["href"]
             title = title_block.a.getText()
+            year = self._get_year(title)
+            if year is "2015":
+                return None
+            car.year = year
             car.url = link
             car.trim = self._get_trim_word(title)
             car.number = self._get_number(title)
-            car.year = self._get_year(title)
+
         except Exception as ex:
             print ex
             pass
